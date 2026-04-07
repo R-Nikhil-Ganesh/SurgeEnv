@@ -54,7 +54,7 @@ def _normalize_url(url: str) -> str:
 
 def _read_runtime_config() -> tuple[str, str, str, str, float]:
     api_base_url = _normalize_url(os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1"))
-    model_name = os.environ.get("MODEL_NAME", "openai/gpt-4o-mini").strip()
+    model_name = os.environ.get("MODEL_NAME", "").strip()
 
     # Prefer canonical env names; keep backward compatibility for earlier local setup.
     hf_token = (
@@ -83,7 +83,9 @@ def _read_runtime_config() -> tuple[str, str, str, str, float]:
     if not api_base_url:
         raise RuntimeError("Missing API_BASE_URL. Set API_BASE_URL to an OpenAI-compatible endpoint.")
     if not model_name:
-        raise RuntimeError("Missing MODEL_NAME. Set MODEL_NAME to the model identifier to use.")
+        raise RuntimeError(
+            "Missing MODEL_NAME. Set MODEL_NAME explicitly (for HF Router use a supported router model id)."
+        )
     if not env_base_url:
         raise RuntimeError(
             "Missing OPENENV_URL/ENV_BASE_URL. Set OPENENV_URL (or ENV_BASE_URL) to your env endpoint."
@@ -130,49 +132,30 @@ def _model_action(
         "instruction": "Return ONLY one integer in [0,6].",
     }
 
-    try:
-        response = client.chat.completions.create(
-            model=model_name,
-            temperature=0,
-            max_tokens=8,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an SRE control policy for a simulator. Output only a single integer action in [0,6].",
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(prompt_payload),
-                },
-            ],
-        )
-        output_text = (response.choices[0].message.content or "").strip()
-        match = re.search(r"-?\d+", output_text)
-        if not match:
-            finish_reason = response.choices[0].finish_reason
-            _log(
-                "END",
-                {
-                    "event": "model_parse_fallback",
-                    "finish_reason": finish_reason,
-                    "model": model_name,
-                    "reason": "non_integer_output",
-                    "task": task_name,
-                },
-            )
-            return 0
-        return _clamp_action(int(match.group(0)))
-    except Exception as exc:
-        _log(
-            "END",
+    response = client.chat.completions.create(
+        model=model_name,
+        temperature=0,
+        max_tokens=8,
+        messages=[
             {
-                "event": "model_action_fallback",
-                "model": model_name,
-                "reason": str(exc),
-                "task": task_name,
+                "role": "system",
+                "content": "You are an SRE control policy for a simulator. Output only a single integer action in [0,6].",
             },
+            {
+                "role": "user",
+                "content": json.dumps(prompt_payload),
+            },
+        ],
+    )
+    output_text = (response.choices[0].message.content or "").strip()
+    match = re.search(r"-?\d+", output_text)
+    if not match:
+        finish_reason = response.choices[0].finish_reason
+        raise RuntimeError(
+            f"Model returned non-integer action for task={task_name!r}. "
+            f"finish_reason={finish_reason!r}, output={output_text!r}"
         )
-        return 0
+    return _clamp_action(int(match.group(0)))
 
 
 def run_task(
