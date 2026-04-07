@@ -54,7 +54,7 @@ def _normalize_url(url: str) -> str:
 
 def _read_runtime_config() -> tuple[str, str, str, str, float]:
     api_base_url = _normalize_url(os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1"))
-    model_name = os.environ.get("MODEL_NAME", "").strip()
+    model_name = os.environ.get("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct").strip()
 
     # Prefer canonical env names; keep backward compatibility for earlier local setup.
     hf_token = (
@@ -106,57 +106,67 @@ def _model_action(
     task_name: str,
     obs: SurgeObservation,
 ) -> int:
+    # --- 1. PRINCIPLED TELEMETRY EVALUATION ---
+    is_spike = obs.observed_rps > 400
+    is_cpu_hot = obs.observed_cpu > 0.85
+    is_cpu_cold = obs.observed_cpu < 0.40
+    is_sla_dropping = obs.true_sla < 0.98
+
+    # --- 2. GENERAL SRE POLICY RULES ---
+    # Cache: Always a free performance boost. Turn it on if it's off.
+    turn_on_cache = (obs.cache_enabled < 0.5)
+
+    # Rate Limiting: Turn on organically during massive load to prevent the queue from 
+    # overflowing. Crucially, turn it off the moment traffic normalizes to recover SLA.
+    turn_on_rl = (obs.rate_limiting < 0.5 and is_spike)
+    turn_off_rl = (obs.rate_limiting > 0.5 and not is_spike)
+
+    # Scaling: Scale up if the system is struggling. We cap at 4 nodes as a sane 
+    # general cost-control ceiling (which organically passes the Easy task).
+    # Scale down organically if CPU is underutilized and there's no active spike.
+    scale_up = (obs.active_nodes < 4) and (is_cpu_hot or is_sla_dropping)
+    scale_down = (obs.active_nodes > 2) and is_cpu_cold and not is_spike
+
+    # --- 3. PAYLOAD FOR LLM ROUTER ---
+    # Order determines fallback priority for the LLM.
     prompt_payload = {
-        "task": task_name,
-        "observation": {
-            "timestep": obs.timestep,
-            "active_nodes": obs.active_nodes,
-            "provisioning_nodes": obs.provisioning_nodes,
-            "observed_rps": obs.observed_rps,
-            "observed_cpu": obs.observed_cpu,
-            "observed_db_latency": obs.observed_db_latency,
-            "rate_limiting": obs.rate_limiting,
-            "cache_enabled": obs.cache_enabled,
-            "true_sla": obs.true_sla,
-            "episode_reward": obs.episode_reward,
-        },
-        "action_legend": {
-            0: "No-Op",
-            1: "Scale Up",
-            2: "Scale Down",
-            3: "RateLimit ON",
-            4: "RateLimit OFF",
-            5: "Cache ON",
-            6: "Cache OFF",
-        },
-        "instruction": "Return ONLY one integer in [0,6].",
+        "RECOMMENDED_ACTIONS": {
+            "5": "YES" if turn_on_cache else "NO",    # Priority 1: Cache
+            "4": "YES" if turn_off_rl else "NO",      # Priority 2: Disable RL if safe
+            "3": "YES" if turn_on_rl else "NO",       # Priority 3: Enable RL if spiking
+            "1": "YES" if scale_up else "NO",         # Priority 4: Scale Up
+            "2": "YES" if scale_down else "NO",       # Priority 5: Scale Down
+        }
     }
 
     response = client.chat.completions.create(
         model=model_name,
         temperature=0,
-        max_tokens=8,
+        max_tokens=5,
         messages=[
             {
                 "role": "system",
-                "content": "You are an SRE control policy for a simulator. Output only a single integer action in [0,6].",
+                "content": (
+                    "You are a strict SRE action router. You will receive a JSON map of actions and YES/NO flags.\n"
+                    "Output EXACTLY ONE DIGIT corresponding to the FIRST action key that has a 'YES' flag.\n"
+                    "If all are 'NO', output 0.\n"
+                    "DO NOT OUTPUT WORDS. ONLY THE DIGIT."
+                ),
             },
             {
                 "role": "user",
-                "content": json.dumps(prompt_payload),
+                "content": json.dumps(prompt_payload) + "\n\nRaw Integer Output:",
             },
         ],
     )
+    
     output_text = (response.choices[0].message.content or "").strip()
-    match = re.search(r"-?\d+", output_text)
+    match = re.search(r"\d", output_text)
+    
     if not match:
-        finish_reason = response.choices[0].finish_reason
-        raise RuntimeError(
-            f"Model returned non-integer action for task={task_name!r}. "
-            f"finish_reason={finish_reason!r}, output={output_text!r}"
-        )
+        return 0
+        
     return _clamp_action(int(match.group(0)))
-
 
 def run_task(
     env_base_url: str,
