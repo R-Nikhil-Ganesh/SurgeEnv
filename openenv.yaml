@@ -1,0 +1,60 @@
+spec_version: 1
+name: surge
+description: >-
+  SurgeEnvV2 is an SRE traffic surge simulator with delayed scaling, lagged metrics,
+  stochastic cache/rate-limit mitigation, queue dynamics, and cost-aware rewards.
+type: space
+runtime: fastapi
+app: server.app:app
+port: 8000
+
+action_space:
+  type: Discrete
+  n: 7
+  mapping:
+    "0": No-Op
+    "1": Scale Up
+    "2": Scale Down
+    "3": RateLimit ON
+    "4": RateLimit OFF
+    "5": Cache ON
+    "6": Cache OFF
+
+observation_space:
+  shape: [8]
+  fields:
+    - timestep
+    - active_nodes
+    - provisioning_nodes
+    - observed_rps
+    - observed_cpu
+    - observed_db_latency
+    - rate_limiting
+    - cache_enabled
+
+tasks:
+  - id: survive_spike
+    name: Survive the spike
+    difficulty: easy
+    grader: surge.tasks:SurviveSpikeGrader
+  - id: cost_aware_mitigation
+    name: Cost-aware mitigation
+    difficulty: medium
+    grader: surge.tasks:CostAwareMitigationGrader
+  - id: adaptive_sre
+    name: Adaptive SRE
+    difficulty: hard
+    grader: surge.tasks:AdaptiveSREGrader
+
+environment:
+  name: SurgeEnvV2
+  entry_point: surge.env:SurgeEnvV2
+  server_entry_point: surge.server.surge_environment:SurgeEnvironment
+  action_model: surge.models:SurgeAction
+  observation_model: surge.models:SurgeObservation
+  state_model: surge.models:SurgeState
+
+entry_points:
+  env: surge.env:SurgeEnvV2
+  tasks: surge.tasks:TASKS
+  server: server.app:app
