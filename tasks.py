@@ -63,14 +63,16 @@ class SurgeTaskRubric(Rubric):
 
     @staticmethod
     def _clamp(value: float) -> float:
-        return max(0.0, min(1.0, float(value)))
+        # Strictly bound between > 0.0 and < 1.0
+        return max(0.000001, min(0.999999, float(value)))
 
     def forward(self, action: Any, observation: Any) -> float:
         del action
         self._track(observation)
         if not bool(getattr(observation, "done", False)):
-            self.last_score = 0.0
-            return 0.0
+            # Never return exact 0.0 on intermediate steps
+            self.last_score = 0.000001
+            return 0.000001
 
         score = self._final_score(observation)
         score = self._clamp(score)

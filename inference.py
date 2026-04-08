@@ -233,7 +233,7 @@ def run_task(
         state = env.state()
 
     elapsed_s = time.time() - start
-    final_score = float(grader.last_score if grader.last_score is not None else 0.0)
+    final_score = float(grader.last_score if grader.last_score is not None else 0.000001)
 
     result = {
         "task_id": task.id,
