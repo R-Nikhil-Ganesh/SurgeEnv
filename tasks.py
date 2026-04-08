@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Callable, Dict, Literal, Type
 
 from openenv.core.rubrics.base import Rubric
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 Difficulty = Literal["easy", "medium", "hard"]
+_SCORE_EPS = 1e-6
 
 
 class TaskDefinition(BaseModel):
@@ -63,16 +65,19 @@ class SurgeTaskRubric(Rubric):
 
     @staticmethod
     def _clamp(value: float) -> float:
-        # Strictly bound between > 0.0 and < 1.0
-        return max(0.000001, min(0.999999, float(value)))
+        # Strictly bound between > 0.0 and < 1.0, including non-finite safety.
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            return _SCORE_EPS
+        return max(_SCORE_EPS, min(1.0 - _SCORE_EPS, numeric))
 
     def forward(self, action: Any, observation: Any) -> float:
         del action
         self._track(observation)
         if not bool(getattr(observation, "done", False)):
             # Never return exact 0.0 on intermediate steps
-            self.last_score = 0.000001
-            return 0.000001
+            self.last_score = _SCORE_EPS
+            return _SCORE_EPS
 
         score = self._final_score(observation)
         score = self._clamp(score)

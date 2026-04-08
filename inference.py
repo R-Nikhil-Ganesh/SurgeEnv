@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -14,6 +15,16 @@ from openai import OpenAI
 from surge.client import SurgeEnv
 from surge.models import SurgeAction, SurgeObservation
 from surge.tasks import TASKS, create_grader
+
+
+_SCORE_EPS = 1e-6
+
+
+def _strict_score(value: float) -> float:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return _SCORE_EPS
+    return max(_SCORE_EPS, min(1.0 - _SCORE_EPS, numeric))
 
 
 def _log(tag: str, payload: Any) -> None:
@@ -213,7 +224,7 @@ def run_task(
             done = step_result.done
             final_reward = float(step_result.reward or 0.0)
 
-            score_update = float(grader(SurgeAction(action=action_value), obs))
+            score_update = _strict_score(float(grader(SurgeAction(action=action_value), obs)))
 
             _log(
                 "STEP",
@@ -233,14 +244,14 @@ def run_task(
         state = env.state()
 
     elapsed_s = time.time() - start
-    final_score = float(grader.last_score if grader.last_score is not None else 0.000001)
+    final_score = _strict_score(float(grader.last_score if grader.last_score is not None else _SCORE_EPS))
 
     result = {
         "task_id": task.id,
         "difficulty": task.difficulty,
         "seed": seed,
         "steps": steps,
-        "score": round(final_score, 6),
+        "score": round(_strict_score(final_score), 6),
         "final_reward": round(final_reward, 6),
         "episode_reward": round(float(state.cumulative_reward), 6),
         "terminated_early": bool(state.terminated_early),
