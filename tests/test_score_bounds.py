@@ -8,8 +8,8 @@ from surge.inference import _strict_score
 from surge.tasks import TASKS, create_grader
 
 
-SCORE_MIN = 0.002
-SCORE_MAX = 0.998
+SCORE_MIN = 0.02
+SCORE_MAX = 0.98
 
 
 def _observation(**overrides):
@@ -40,6 +40,9 @@ def test_strict_score_helper_is_bounded(value: float) -> None:
 @pytest.mark.parametrize("task_id", sorted(TASKS))
 def test_task_grader_scores_are_bounded(task_id: str) -> None:
     grader = create_grader(task_id)
+
+    # Initial state should already be bounded.
+    _assert_in_bounds(float(grader.last_score))
 
     # Intermediate-step output must never escape the strict bounds.
     intermediate = grader.forward(None, _observation(done=False))

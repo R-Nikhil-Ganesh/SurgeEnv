@@ -78,7 +78,7 @@ Three submission tasks are implemented in `tasks.py`:
   - Handle randomized spike timing/intensity.
   - Avoid early termination.
 
-Each grader returns a float score in `[0.002, 0.998]` using OpenEnv rubric-style grading classes.
+Each grader returns a float score in `[0.02, 0.98]` using OpenEnv rubric-style grading classes.
 
 ## Local Setup
 

@@ -17,7 +17,7 @@ from surge.models import SurgeAction, SurgeObservation
 from surge.tasks import TASKS, create_grader
 
 
-_SCORE_EPS = 2e-3
+_SCORE_EPS = 2e-2
 
 
 def _strict_score(value: float) -> float:

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 
 Difficulty = Literal["easy", "medium", "hard"]
-_SCORE_EPS = 2e-3
+_SCORE_EPS = 2e-2
 _SCORE_ONE = 1 - _SCORE_EPS
 
 
@@ -32,6 +32,7 @@ class SurgeTaskRubric(Rubric):
         self.reset()
 
     def reset(self) -> None:
+        self.last_score = _SCORE_EPS
         self._steps = 0
         self._min_sla = _SCORE_ONE
         self._sum_nodes = 0.0
