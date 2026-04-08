@@ -17,14 +17,14 @@ from surge.models import SurgeAction, SurgeObservation
 from surge.tasks import TASKS, create_grader
 
 
-_SCORE_EPS = 1e-6
+_SCORE_EPS = 2e-3
 
 
 def _strict_score(value: float) -> float:
     numeric = float(value)
     if not math.isfinite(numeric):
         return _SCORE_EPS
-    return max(_SCORE_EPS, min(1.0 - _SCORE_EPS, numeric))
+    return max(_SCORE_EPS, min(1 - _SCORE_EPS, numeric))
 
 
 def _log(tag: str, payload: Any) -> None:

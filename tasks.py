@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 
 
 Difficulty = Literal["easy", "medium", "hard"]
-_SCORE_EPS = 1e-6
+_SCORE_EPS = 2e-3
+_SCORE_ONE = 1 - _SCORE_EPS
 
 
 class TaskDefinition(BaseModel):
@@ -32,7 +33,7 @@ class SurgeTaskRubric(Rubric):
 
     def reset(self) -> None:
         self._steps = 0
-        self._min_sla = 1.0
+        self._min_sla = _SCORE_ONE
         self._sum_nodes = 0.0
         self._max_nodes = 0
         self._used_rate_limit = False
@@ -69,7 +70,7 @@ class SurgeTaskRubric(Rubric):
         numeric = float(value)
         if not math.isfinite(numeric):
             return _SCORE_EPS
-        return max(_SCORE_EPS, min(1.0 - _SCORE_EPS, numeric))
+        return max(_SCORE_EPS, min(1 - _SCORE_EPS, numeric))
 
     def forward(self, action: Any, observation: Any) -> float:
         del action
@@ -129,7 +130,7 @@ class SurviveSpikeGrader(SurgeTaskRubric):
         within_sla = self._min_sla > 0.95
         within_nodes = self._max_nodes <= 4
         no_early_termination = not self._terminated_early
-        return 1.0 if (within_sla and within_nodes and no_early_termination) else 0.0
+        return self._clamp(_SCORE_ONE if (within_sla and within_nodes and no_early_termination) else _SCORE_EPS)
 
 
 @register_task(
@@ -145,13 +146,13 @@ class CostAwareMitigationGrader(SurgeTaskRubric):
         del observation
         avg_nodes = self._sum_nodes / max(1, self._steps)
 
-        sla_score = 1.0 if self._min_sla > 0.95 else max(0.0, self._min_sla / 0.95)
-        cost_score = 1.0 if avg_nodes <= 3.0 else max(0.0, 1.0 - ((avg_nodes - 3.0) / 2.0))
-        tool_score = 1.0 if (self._used_cache and self._used_rate_limit) else 0.0
-        stability_score = 1.0 if not self._terminated_early else 0.0
+        sla_score = self._clamp(_SCORE_ONE if self._min_sla > 0.95 else max(_SCORE_EPS, self._min_sla / 0.95))
+        cost_score = self._clamp(_SCORE_ONE if avg_nodes <= 3.0 else max(_SCORE_EPS, _SCORE_ONE - ((avg_nodes - 3.0) / 2.0)))
+        tool_score = self._clamp(_SCORE_ONE if (self._used_cache and self._used_rate_limit) else _SCORE_EPS)
+        stability_score = self._clamp(_SCORE_ONE if not self._terminated_early else _SCORE_EPS)
 
         # SLA and cost are primary; tool usage is mandatory for full credit.
-        return 0.40 * sla_score + 0.35 * cost_score + 0.20 * tool_score + 0.05 * stability_score
+        return self._clamp(0.40 * sla_score + 0.35 * cost_score + 0.20 * tool_score + 0.05 * stability_score)
 
 
 @register_task(
@@ -165,9 +166,9 @@ class AdaptiveSREGrader(SurgeTaskRubric):
 
     def _final_score(self, observation: Any) -> float:
         del observation
-        reward_score = 1.0 if self._episode_reward > 30.0 else max(0.0, (self._episode_reward + 30.0) / 60.0)
-        no_early_termination = 1.0 if not self._terminated_early else 0.0
-        return 0.8 * reward_score + 0.2 * no_early_termination
+        reward_score = self._clamp(_SCORE_ONE if self._episode_reward > 30.0 else max(_SCORE_EPS, (self._episode_reward + 30.0) / 60.0))
+        no_early_termination = self._clamp(_SCORE_ONE if not self._terminated_early else _SCORE_EPS)
+        return self._clamp(0.8 * reward_score + 0.2 * no_early_termination)
 
 
 def create_grader(task_id: str) -> SurgeTaskRubric:
